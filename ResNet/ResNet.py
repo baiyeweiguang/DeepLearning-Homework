@@ -4,6 +4,12 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from tensorboardX import SummaryWriter
 
+import math
+from tqdm import tqdm
+
+INPUT_SHAPE = (3,224,224)
+NC = 100
+
 class BottleNeck(nn.Module):
   def __init__(self, input_channels, out_channels, downsample=False, stride=1):
     super(BottleNeck, self).__init__()
@@ -76,8 +82,10 @@ class Head(nn.Module):
   def forward(self, X):
     Y = self.avgpool(X)
     Y = Y.view(Y.size(0), -1)
+
     Y = self.fc(Y)
-    Y = self.softmax(Y) 
+    Y = self.softmax(Y)
+
     return Y  
 
 
@@ -85,13 +93,31 @@ class ResNet50(nn.Module):
   def __init__(self, input_shape, num_classes):
     super(ResNet50, self).__init__()
     self.input_shape = input_shape
-    self.backbone = Backbone(input_channels=3, layers=[3,4,6,3])
+    self.backbone = Backbone(input_channels=input_shape[0], layers=[3,4,6,3])
     self.head = Head(input_channels=2048, num_classes=num_classes)
+    self.init_param()
     
   def forward(self, X):
     Y = self.backbone(X)
     Y = self.head(Y)
     return Y
+  
+  def init_param(self):
+    # The following is initialization
+    for m in self.modules():
+      if isinstance(m, nn.Conv2d):
+          n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+          m.weight.data.normal_(0, math.sqrt(2./n))
+      elif isinstance(m, nn.BatchNorm2d):
+          m.weight.data.fill_(1)
+          m.bias.data.zero_()
+      elif isinstance(m, nn.Linear):
+          n = m.weight.shape[0] * m.weight.shape[1]
+          m.weight.data.normal_(0, math.sqrt(2./n))
+          m.bias.data.zero_()
+  
+  def load_from_pth(self, path):
+    self.load_state_dict(torch.load(path)) 
  
 class Trainer:
   def __init__(self, model, device, num_epochs=100, batch_size=32, lr=0.001, dataset = 'CIFAR100'):
@@ -103,20 +129,26 @@ class Trainer:
     self.model = model 
     self.model.to(device)
     
-    self.loss_fn = nn.CrossEntropyLoss(reduction='mean') 
-    self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
-    
+    self.loss_fn = nn.NLLLoss(reduction='mean') 
+    # self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+    self.optimizer = optim.SGD(self.model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
+    self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor = 0.1, patience=5)
     transform = transforms.Compose([transforms.Resize((224,224)), transforms.ToTensor()])
-    
-    if dataset == 'CIFAR10':
-      self.train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transform, download=True)
-      self.test_dataset = datasets.CIFAR10(root='./data', train=False, transform=transform, download=True)
+    #transforms.Resize((224,224)), 
+    self.train_dataset = None
+    self.test_dataset = None
+    if dataset == 'CIFAR100':
+      self.train_dataset = datasets.CIFAR100(root='./data', train=True, transform=transform, download=True)
+      self.test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transform, download=True)
     elif dataset == 'FashionMNIST':
       self.train_dataset = datasets.FashionMNIST(root='./data', train=True, transform=transform, download=True)
       self.test_dataset = datasets.FashionMNIST(root='./data', train=False, transform=transform, download=True)
+    elif dataset == 'MNIST':
+      self.train_dataset = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
+      self.test_dataset = datasets.MNIST(root='./data', train=False, transform=transform, download=True) 
 
-    self.train_loader = torch.utils.data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True)
-    self.test_loader = torch.utils.data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=False)
+    self.train_loader = torch.utils.data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
+    self.test_loader = torch.utils.data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
     
     self.writer = SummaryWriter()
     self.best_acc = 0.0
@@ -124,7 +156,12 @@ class Trainer:
   def train(self):
     for epoch in range(self.num_epochs):
       self.model.train()
-      for i, (x, y) in enumerate(self.train_loader):
+      
+      loss = 0.0
+      losses = []
+      loop = tqdm((self.train_loader), total=len(self.train_loader))
+      for i, (x, y) in enumerate(loop):
+        # print(x.shape)
         x = x.to(self.device)
         y = y.to(self.device)
         y_pred = self.model(x)
@@ -132,14 +169,15 @@ class Trainer:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        
-        if i % 100 == 0:
-          print('Epoch: {}, Iteration: {}, Loss: {}'.format(epoch, i, loss))
-        self.writer.add_scalar('Loss', loss, epoch)
-        
+        losses.append(loss)
+        loop.set_description('Epoch[{}/{}]: Iteration: {}, Loss: {}'.format(epoch, self.num_epochs, i, loss))
+      
+      avg_loss = sum(losses)/len(losses)  
+      self.scheduler.step(avg_loss)
       acc = self.test()
-      print('Epoch: {}, Accuracy: {}'.format(epoch, acc))
+      print('Epoch: {}, Accuracy: {}, AvgLoss: {}'.format(epoch, acc, avg_loss))
       self.writer.add_scalar('Accuracy', acc, epoch)
+      self.writer.add_scalar('Loss', loss, epoch)
       if acc > self.best_acc:
         self.best_acc = acc
         torch.save(self.model.state_dict(), './best_model.pth')
@@ -164,22 +202,22 @@ def predict():
   import matplotlib.pyplot as plt
   
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model = ResNet50(input_shape=(3,224,224), num_classes=100)
+  model = ResNet50(input_shape=INPUT_SHAPE, num_classes=NC)
   model.load_from_pth('./best_model.pth')
   model.to(device)
   model.eval()
   
-  test_dataset = datasets.MNIST(root='./data', train=False, transform=transforms.ToTensor(), download=True)
+  test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transforms.ToTensor(), download=True)
   test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
   
-  # predict 20 images and plot them
+  # predict 8 images and plot them
   for i, (x, y) in enumerate(test_loader):
-    if i == 20:
+    if i == 8:
       break
     x = x.to(device)
     y_pred = model(x)
     y_pred = y_pred.argmax(dim=1).detach().cpu().numpy()
-    plt.subplot(4, 5, i+1)
+    plt.subplot(2, 4, i+1)
     plt.imshow(x[0, 0, :, :].detach().cpu().numpy(), cmap='gray')
     color = 'red' if y_pred[0] != y[0] else 'green'
     plt.title('Predict: {}'.format(y_pred[0]), color=color)
@@ -189,8 +227,9 @@ def predict():
 
 def main():
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model = ResNet50(input_shape=(3,224,224), num_classes=100)
-  trainer = Trainer(model, device, num_epochs=200)
+  model = ResNet50(input_shape=INPUT_SHAPE, num_classes=NC)
+  model.load_from_pth('./best_model.pth')
+  trainer = Trainer(model, device, batch_size=96, num_epochs=200, dataset='CIFAR100')
   trainer.train()
   predict()
   

@@ -4,7 +4,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 
 from tensorboardX import SummaryWriter
-import tqdm as tqdm
+from tqdm import tqdm
 
 class Lenet(nn.Module):
   def __init__(self, input_shape, num_classes):
@@ -52,13 +52,13 @@ class Trainer:
     self.model = model 
     self.model.to(device)
     
-    self.loss_fn = nn.CrossEntropyLoss(reduction='mean') 
+    self.loss_fn = nn.NLLLoss(reduction='mean') 
     self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
     
     self.train_dataset = datasets.MNIST(root='./data', train=True, transform=transforms.ToTensor(), download=True)
     self.test_dataset = datasets.MNIST(root='./data', train=False, transform=transforms.ToTensor(), download=True)
-    self.train_loader = torch.utils.data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True)
-    self.test_loader = torch.utils.data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=False)
+    self.train_loader = torch.utils.data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
+    self.test_loader = torch.utils.data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
     
     self.writer = SummaryWriter()
     self.best_acc = 0.0
@@ -66,7 +66,10 @@ class Trainer:
   def train(self):
     for epoch in range(self.num_epochs):
       self.model.train()
-      for i, (x, y) in enumerate(self.train_loader):
+      
+      loss = 0.0
+      loop = tqdm((self.train_loader), total=len(self.train_loader))
+      for i, (x, y) in enumerate(loop):
         x = x.to(self.device)
         y = y.to(self.device)
         y_pred = self.model(x)
@@ -74,16 +77,15 @@ class Trainer:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+  
+        loop.set_description('Epoch[{}:{}]: Iteration: {}, Loss: {}'.format(epoch, self.num_epochs, i, loss))
         
-        if i % 100 == 0:
-          print('Epoch: {}, Iter: {}, Loss: {}'.format(epoch, i, loss))
-          self.writer.add_scalar('Loss', loss, epoch * len(self.train_loader) + i)
       acc = self.test()
-      print('Epoch: {}, Accuracy: {}'.format(epoch, acc))
+      print('Epoch: {}, Accuracy: {}, Loss: {}'.format(epoch, acc), loss)
       self.writer.add_scalar('Accuracy', acc, epoch)
+      self.writer.add_scalar('Loss', loss, epoch)
       if acc > self.best_acc:
         self.best_acc = acc
-        print('Save best model to {}'.format('./best_model.pth'))
         torch.save(self.model.state_dict(), './best_model.pth')
           
    
