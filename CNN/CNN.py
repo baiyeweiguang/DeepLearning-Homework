@@ -52,7 +52,7 @@ class Trainer:
     self.model = model 
     self.model.to(device)
     
-    self.loss_fn = nn.NLLLoss(reduction='mean') 
+    self.loss_fn = nn.NLLLoss() 
     self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
     
     self.train_dataset = datasets.MNIST(root='./data', train=True, transform=transforms.ToTensor(), download=True)
@@ -73,6 +73,7 @@ class Trainer:
         x = x.to(self.device)
         y = y.to(self.device)
         y_pred = self.model(x)
+        y_pred = torch.log(y_pred)
         loss = self.loss_fn(y_pred, y)
         self.optimizer.zero_grad()
         loss.backward()

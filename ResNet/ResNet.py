@@ -129,23 +129,28 @@ class Trainer:
     self.model = model 
     self.model.to(device)
     
-    self.loss_fn = nn.NLLLoss(reduction='mean') 
+    self.loss_fn = nn.NLLLoss() 
     # self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
     self.optimizer = optim.SGD(self.model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
     self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor = 0.1, patience=5)
-    transform = transforms.Compose([transforms.Resize((224,224)), transforms.ToTensor()])
+    transform_train = transforms.Compose([transforms.RandomHorizontalFlip(),
+      transforms.RandomCrop(32, padding=4),
+      transforms.Resize((224,224)), 
+      transforms.ToTensor()])
+    transform_test = transforms.Compose([transforms.Resize((224,224)), 
+      transforms.ToTensor()])
     #transforms.Resize((224,224)), 
     self.train_dataset = None
     self.test_dataset = None
     if dataset == 'CIFAR100':
-      self.train_dataset = datasets.CIFAR100(root='./data', train=True, transform=transform, download=True)
-      self.test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transform, download=True)
+      self.train_dataset = datasets.CIFAR100(root='./data', train=True, transform=transform_train, download=True)
+      self.test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transform_test, download=True)
     elif dataset == 'FashionMNIST':
-      self.train_dataset = datasets.FashionMNIST(root='./data', train=True, transform=transform, download=True)
-      self.test_dataset = datasets.FashionMNIST(root='./data', train=False, transform=transform, download=True)
+      self.train_dataset = datasets.FashionMNIST(root='./data', train=True, transform=transform_train, download=True)
+      self.test_dataset = datasets.FashionMNIST(root='./data', train=False, transform=transform_test, download=True)
     elif dataset == 'MNIST':
-      self.train_dataset = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
-      self.test_dataset = datasets.MNIST(root='./data', train=False, transform=transform, download=True) 
+      self.train_dataset = datasets.MNIST(root='./data', train=True, transform=transform_train, download=True)
+      self.test_dataset = datasets.MNIST(root='./data', train=False, transform=transform_test, download=True) 
 
     self.train_loader = torch.utils.data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4)
     self.test_loader = torch.utils.data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
@@ -165,6 +170,7 @@ class Trainer:
         x = x.to(self.device)
         y = y.to(self.device)
         y_pred = self.model(x)
+        y_pred = torch.log(y_pred)
         loss = self.loss_fn(y_pred, y)
         self.optimizer.zero_grad()
         loss.backward()
