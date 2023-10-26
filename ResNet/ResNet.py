@@ -104,7 +104,7 @@ class ResNet50(nn.Module):
     return Y
   
   def init_param(self):
-    # The following is initialization
+    # 初始化参数
     for m in self.modules():
       if isinstance(m, nn.Conv2d):
           n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
@@ -195,6 +195,7 @@ class Trainer:
       if acc > self.best_acc:
         self.best_acc = acc
         torch.save(self.model.state_dict(), './best_model.pth')
+        print("Model saved")
           
    
   def test(self):
@@ -212,22 +213,35 @@ class Trainer:
     acc = correct / total    
     return acc
 
-def predict():
+def eval():
   import matplotlib.pyplot as plt
   import numpy as np
   
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   model = ResNet50(input_shape=INPUT_SHAPE, num_classes=NC)
-  model.load_from_pth('./best_model_0.75.pth')
+  model.load_from_pth('./best_model_cifar10.pth')
   model.to(device)
   model.eval()
   transform_test = transforms.Compose([transforms.Resize((224,224)), 
-      transforms.ToTensor()])
+      transforms.ToTensor()]) 
+  test_dataset = datasets.CIFAR10(root='./data', train=False, transform=transform_test, download=True)
   
-  test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transform_test, download=False)
+  # 计算测试集的准确率
+  test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=32, shuffle=True)
+  total = 0
+  correct = 0
+  for x, y in test_loader:
+    total += x.shape[0]
+    x = x.to(device)
+    y_pred = model(x)
+    y_pred = y_pred.argmax(dim=1).detach().cpu()
+    correct += torch.sum(y_pred == y).item()
+  
+  acc = correct/total
+  print("Accuracy in test dataset: {}".format(acc))
+  
+  # 随机选取8张图片进行预测
   test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=True)
-  
-  # predict 8 images and plot them
   for i, (x, y) in enumerate(test_loader):
     if i == 8:
       break
@@ -244,13 +258,14 @@ def predict():
   
   plt.show()   
 
-def main():
+def train():
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   model = ResNet50(input_shape=INPUT_SHAPE, num_classes=NC)
   model.load_from_pth('./best_model.pth')
-  trainer = Trainer(model, device, batch_size=96, num_epochs=200, lr=1e-4, dataset=DATASET)
+  trainer = Trainer(model, device, batch_size=32, num_epochs=200, lr=1e-5, dataset=DATASET)
   trainer.train()
+      
   
 if __name__ == '__main__':
-  main()
-  # predict()
+  train()
+  # eval()

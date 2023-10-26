@@ -88,6 +88,7 @@ class Trainer:
       if acc > self.best_acc:
         self.best_acc = acc
         torch.save(self.model.state_dict(), './best_model.pth')
+        print("Model saved")
           
    
   def test(self):
@@ -105,7 +106,7 @@ class Trainer:
     acc = correct / total    
     return acc
 
-def predict():
+def eval():
   import matplotlib.pyplot as plt
   
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -115,9 +116,23 @@ def predict():
   model.eval()
   
   test_dataset = datasets.MNIST(root='./data', train=False, transform=transforms.ToTensor(), download=True)
-  test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
   
-  # predict 20 images and plot them
+  # 计算测试集的准确率
+  test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=512, shuffle=True)
+  total = 0
+  correct = 0
+  for x, y in test_loader:
+    total += x.shape[0]
+    x = x.to(device)
+    y_pred = model(x)
+    y_pred = y_pred.argmax(dim=1).detach().cpu()
+    correct += torch.sum(y_pred == y).item() 
+  
+  acc = correct/total
+  print("Accuracy in test dataset: {}".format(acc))  
+  
+  # 随机选取20张图片进行测试
+  test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
   for i, (x, y) in enumerate(test_loader):
     if i == 20:
       break
@@ -133,13 +148,12 @@ def predict():
   plt.show()    
 
 
-def main():
+def train():
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   model = Lenet(input_shape=(1, 28, 28), num_classes=10)
-  trainer = Trainer(model, device, num_epochs=15, batch_size=512, lr=0.001)
+  trainer = Trainer(model, device, num_epochs=10, batch_size=512, lr=0.001)
   trainer.train()    
-  predict()
   
 if __name__ == '__main__':
-  main()
+  train()
   
