@@ -82,7 +82,7 @@ class Trainer:
         loop.set_description('Epoch[{}:{}]: Iteration: {}, Loss: {}'.format(epoch, self.num_epochs, i, loss))
         
       acc = self.test()
-      print('Epoch: {}, Accuracy: {}, Loss: {}'.format(epoch, acc), loss)
+      print('Epoch: {}, Accuracy: {}'.format(epoch, acc))
       self.writer.add_scalar('Accuracy', acc, epoch)
       self.writer.add_scalar('Loss', loss, epoch)
       if acc > self.best_acc:

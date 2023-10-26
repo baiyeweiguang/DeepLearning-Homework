@@ -8,7 +8,8 @@ import math
 from tqdm import tqdm
 
 INPUT_SHAPE = (3,224,224)
-NC = 100
+NC = 10
+DATASET='CIFAR10'
 
 class BottleNeck(nn.Module):
   def __init__(self, input_channels, out_channels, downsample=False, stride=1):
@@ -131,20 +132,26 @@ class Trainer:
     
     self.loss_fn = nn.NLLLoss() 
     # self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
-    self.optimizer = optim.SGD(self.model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
+    self.optimizer = optim.SGD(self.model.parameters(), lr=self.lr, momentum=0.9, weight_decay=0.0001)
     self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor = 0.1, patience=5)
-    transform_train = transforms.Compose([transforms.RandomHorizontalFlip(),
+    transform_train = transforms.Compose([
+      transforms.RandomHorizontalFlip(),
+      # transforms.RandomVerticalFlip(),
       transforms.RandomCrop(32, padding=4),
+      # transforms.RandomRotation(30),
       transforms.Resize((224,224)), 
       transforms.ToTensor()])
     transform_test = transforms.Compose([transforms.Resize((224,224)), 
       transforms.ToTensor()])
-    #transforms.Resize((224,224)), 
+
     self.train_dataset = None
     self.test_dataset = None
     if dataset == 'CIFAR100':
       self.train_dataset = datasets.CIFAR100(root='./data', train=True, transform=transform_train, download=True)
       self.test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transform_test, download=True)
+    elif dataset == 'CIFAR10':
+      self.train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transform_train, download=True)
+      self.test_dataset = datasets.CIFAR10(root='./data', train=False, transform=transform_test, download=True)
     elif dataset == 'FashionMNIST':
       self.train_dataset = datasets.FashionMNIST(root='./data', train=True, transform=transform_train, download=True)
       self.test_dataset = datasets.FashionMNIST(root='./data', train=False, transform=transform_test, download=True)
@@ -169,6 +176,7 @@ class Trainer:
         # print(x.shape)
         x = x.to(self.device)
         y = y.to(self.device)
+
         y_pred = self.model(x)
         y_pred = torch.log(y_pred)
         loss = self.loss_fn(y_pred, y)
@@ -206,15 +214,18 @@ class Trainer:
 
 def predict():
   import matplotlib.pyplot as plt
+  import numpy as np
   
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   model = ResNet50(input_shape=INPUT_SHAPE, num_classes=NC)
-  model.load_from_pth('./best_model.pth')
+  model.load_from_pth('./best_model_0.75.pth')
   model.to(device)
   model.eval()
+  transform_test = transforms.Compose([transforms.Resize((224,224)), 
+      transforms.ToTensor()])
   
-  test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transforms.ToTensor(), download=True)
-  test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
+  test_dataset = datasets.CIFAR100(root='./data', train=False, transform=transform_test, download=False)
+  test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=1, shuffle=True)
   
   # predict 8 images and plot them
   for i, (x, y) in enumerate(test_loader):
@@ -223,10 +234,12 @@ def predict():
     x = x.to(device)
     y_pred = model(x)
     y_pred = y_pred.argmax(dim=1).detach().cpu().numpy()
+    img = x[0, :, :, :].detach().cpu().numpy()
+    img = np.transpose(img, (1,2,0))
     plt.subplot(2, 4, i+1)
-    plt.imshow(x[0, 0, :, :].detach().cpu().numpy(), cmap='gray')
+    plt.imshow(img)
     color = 'red' if y_pred[0] != y[0] else 'green'
-    plt.title('Predict: {}'.format(y_pred[0]), color=color)
+    plt.title('Pred:{}, True:{}'.format(y_pred[0], y[0]), color=color)
     plt.axis('off')
   
   plt.show()   
@@ -235,9 +248,9 @@ def main():
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   model = ResNet50(input_shape=INPUT_SHAPE, num_classes=NC)
   model.load_from_pth('./best_model.pth')
-  trainer = Trainer(model, device, batch_size=96, num_epochs=200, dataset='CIFAR100')
+  trainer = Trainer(model, device, batch_size=96, num_epochs=200, lr=1e-4, dataset=DATASET)
   trainer.train()
-  predict()
   
 if __name__ == '__main__':
   main()
+  # predict()
